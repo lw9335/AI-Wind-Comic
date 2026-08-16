@@ -99,10 +99,10 @@
     "tailwind-merge": "^3.5.0",
     "tailwindcss": "^4.3.3",
     "typescript": "^5.9.3",
-    "ws": "^8.20.1",
+    "ws": "^8.21.3",
     "y-websocket": "^3.0.0",
-    "yjs": "^13.6.31",
-    "zustand": "^5.0.14"
+    "yjs": "^13.6.32",
+    "zustand": "^5.0.15"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.12.1",
