@@ -183,7 +183,11 @@ flowchart LR
 
 预处理器用传统视觉算法从参考图里抽出“纯粹的控制信息”。Canny、MLSD、Scribble、SoftEdge、Lineart 同属**边缘与线条类**；Depth / Normal 是几何类；OpenPose / Segmentation 是语义类。Wind Comic 当前接入的是 **Canny**：把分镜草图抽成边缘线稿，再按这些线条锁构图。业务含义是：这一镜已经有手绘或 AI 线稿时，正式分镜图不要只“参考一下”，而要尽量按草图的机位、人物站位、景别来画。后面视频常拿分镜图当 image-to-video 首帧，构图一漂，角色位置和镜头语言就对不上。
 
-可以把它想成“描线填色”：草图再糙，只要大轮廓对，正式图也可以画得很完整，但人还站在画面左边、镜头还是俯拍。颜色、细节、画风仍由 Prompt 决定。
+可以把它想成“描线填色”：草图再糙，只要大轮廓对，正式图也可以画得很完整，但人还站在画面左边、镜头还是俯拍。颜色、细节、画风仍由 Prompt 决定。下图是线条类预处理器的实例（Lineart_Anime；本仓库接入的是同属边缘线条类的 Canny）：线稿锁住站位和轮廓，Prompt 改银发、绿眼和光影。
+
+![ControlNet 线稿硬锁构图示例](./images/controlnet-lineart-example.png)
+
+> 图：参考图经 Lineart_Anime 预处理器得到条件图，多张采样构图一致、外观随 Prompt 变化。来源：[深入浅出完整解析 ControlNet 核心基础知识](https://zhuanlan.zhihu.com/p/660924126)（知乎 @Rocky Ding）。
 
 该文对最小单元的拆法，有助于理解“硬锁为什么不会把底模型画崩”：
 
@@ -214,7 +218,23 @@ Z_{new} = \mathrm{Attention}(Q,K,V) + \lambda \cdot \mathrm{Attention}(Q,K',V')
 
 λ 越大，角色参考图对成图的约束越强。这正好对应本项目“跨镜头同一张脸”的需求：角色设定图先生成一次，后续分镜把这张图当 image prompt，而不是每镜重新用文字描述外貌。
 
+![IP-Adapter 解耦交叉注意力结构](./images/ip-adapter-decoupled-cross-attention.png)
+
+> 图：蓝色雪花模块冻结，红色火焰模块可训练。图像走 CLIP Image Encoder → Linear/LN → 独立的图像 cross-attention；文本走原有冻结的 text cross-attention；两者在 Denoising U-Net 里相加。来源：[IP-Adapter原理详解](https://zhuanlan.zhihu.com/p/3472288872) / 论文 Figure 2。
+
 图像特征从哪来？该文写明 Image Encoder 是冻结的 **CLIP**。CLIP 的通俗解释见 [【小白】一文读懂 CLIP 图文多模态模型](https://blog.csdn.net/weixin_47228643/article/details/136690837)：OpenAI 2021 的对比语言-图像预训练。双塔分别是 Image Encoder（ResNet 或 ViT）和 Text Encoder（Transformer）；在一批 N 对图文上，拉近真正配对的余弦相似度、推开其余 \(N^2-N\) 个错误配对。预测时比的是图向量和文向量是否靠近，因此能做零样本分类和检索。IP-Adapter 不重新训练 CLIP，只把它当作“把角色参考图变成一段能和文本特征对齐的向量”的编码器，再经小型 projection network（线性层 + LayerNorm）接到解耦注意力上。
+
+零样本时，把类别写成 `a photo of a {object}` 得到文本向量 \(T_i\)，Image Encoder 得到 \(I_1\)，点积最大的那句就是预测：
+
+![CLIP 零样本分类](./images/clip-zero-shot.png)
+
+> 图：标签文本 → Text Encoder → \(T_1 \ldots T_N\)；待分类图 → Image Encoder → \(I_1\)；\(I_1 \cdot T_i\) 最大者为预测。来源：[一文读懂 CLIP](https://blog.csdn.net/weixin_47228643/article/details/136690837)（CSDN @weixin_47228643）。
+
+CLIP Image Encoder 常用 **ViT**。ViT 不把整图当一张卷积特征图，而是切成 patch、展平、线性投影，加上位置编码和一个可学习 `[class]` token，再送进 \(L\) 层 Transformer Encoder。每一层是 Norm → Multi-Head Attention → 残差，再 Norm → MLP → 残差。分类（以及 CLIP 取全局图像向量）走 `[class]` 这一路。因此 IP-Adapter 冻结 CLIP 时，冻结的就是这条“图当句子、patch 当词”的视觉塔。
+
+![ViT 结构：patch 序列 + Transformer Encoder](./images/clip-vit-architecture.png)
+
+> 图：左为 ViT 全流程，右为 Encoder 单层。来源同上。
 
 和 ControlNet 的工程差异也写在 `comfyui.service.ts` 的注释里：IP-Adapter 改的是 model（身份注入），ControlNet 改的是 conditioning（空间硬锁）。`HybridOrchestrator` 有草图且启用 ControlNet 时优先硬锁，失败回落 IP-Adapter。
 
@@ -228,9 +248,9 @@ Z_{new} = \mathrm{Attention}(Q,K,V) + \lambda \cdot \mathrm{Attention}(Q,K',V')
 
 | 来源 | 补哪一块 |
 |---|---|
-| [深入浅出完整解析 ControlNet 核心基础知识](https://zhuanlan.zhihu.com/p/660924126) | ControlNet 辅助网络、预处理器、锁定/可训练副本、零卷积、Canny |
-| [IP-Adapter原理详解](https://zhuanlan.zhihu.com/p/3472288872) | 解耦交叉注意力、冻结 U-Net、λ 权重、与 ControlNet 的分工 |
-| [【小白】一文读懂 CLIP 图文多模态模型](https://blog.csdn.net/weixin_47228643/article/details/136690837) | CLIP 双塔、对比学习、图文余弦相似度；IP-Adapter 的 Image Encoder |
+| [深入浅出完整解析 ControlNet 核心基础知识](https://zhuanlan.zhihu.com/p/660924126) | ControlNet 辅助网络、预处理器、锁定/可训练副本、零卷积、Canny；配图 `controlnet-lineart-example.png` |
+| [IP-Adapter原理详解](https://zhuanlan.zhihu.com/p/3472288872) | 解耦交叉注意力、冻结 U-Net、λ 权重；配图 `ip-adapter-decoupled-cross-attention.png` |
+| [【小白】一文读懂 CLIP 图文多模态模型](https://blog.csdn.net/weixin_47228643/article/details/136690837) | CLIP 双塔、零样本点积、ViT Image Encoder；配图 `clip-zero-shot.png`、`clip-vit-architecture.png` |
 
 ### 图片链路中的业务约束
 

@@ -43,11 +43,33 @@ Wind Comic（界面品牌名“青枫漫剧”）是一个基于 Next.js 的 AI 
 
 结构上，该文把 ControlNet 拆成三块：**锁定副本**（冻结底模型权重，保住从海量图里学来的画图能力）、**可训练副本**（专门学空间条件）、**零卷积（zero convolution）**（1×1 卷积，权重偏置从 0 起步，训练初期不打扰底模型）。这解释了为什么可以在不大的数据集上学会“按线稿出图”，却不把原来的文生图能力毁掉。
 
+下图是边缘/线条类预处理器的直观效果（图中为 Lineart_Anime，与本项目用的 Canny 同属一类）：左边参考图抽出线稿后，五张成图都锁住了站位、服装轮廓和机位，Prompt 只改了银发、绿眼和哥特光影。
+
+![ControlNet 线稿硬锁构图示例](./images/controlnet-lineart-example.png)
+
+> 图：参考图 → 线稿预处理器 → 构图被锁、细节由 Prompt 改写。来源：[深入浅出完整解析 ControlNet 核心基础知识](https://zhuanlan.zhihu.com/p/660924126)（知乎 @Rocky Ding）。
+
 它和把草图当普通参考图不是一回事。多数云端引擎只能做**软参考**（把草图塞进参考图通道，口头说“请跟构图”，模型可以不听）；ControlNet 是**硬锁**（边缘位置更难被改掉）。它也和 **IP-Adapter** 不要混。
 
 **IP-Adapter** 锁的是“这人长什么样”（脸、服装、身份），不是“人站在画面哪里”。原理口径对齐专栏 [IP-Adapter原理详解](https://zhuanlan.zhihu.com/p/3472288872)：只靠文字很难把复杂外形、配色和身份写清楚；ControlNet / T2I-Adapter 这类附加网络擅长结构控制，但对“把整张参考图当 image prompt”约束不够。IP-Adapter 的解法是**解耦交叉注意力（decoupled cross-attention）**：U-Net 里每一层原来的文本 cross-attention 保持不动，另外加一路图像 cross-attention；训练时只训新增参数，底模型冻结。推理时用权重 λ 调节图像条件有多强。本项目用它做角色跨镜头一致：把已生成的角色参考图喂进 ComfyUI-IPAdapter-Plus，后续镜头尽量同一张脸、同一套服装。可与 ControlNet 叠加，不是互相替代。
 
+![IP-Adapter 解耦交叉注意力结构](./images/ip-adapter-decoupled-cross-attention.png)
+
+> 图：IP-Adapter 整体结构。蓝色雪花 = 冻结（CLIP Image Encoder、Text Encoder、Denoising U-Net、文本 cross-attention）；红色火焰 = 可训练（Linear + LN 投影、图像 cross-attention）。来源：[IP-Adapter原理详解](https://zhuanlan.zhihu.com/p/3472288872) / 论文 Figure 2。
+
 **CLIP** 是 IP-Adapter 抽图像特征时用的图文对齐模型（Contrastive Language-Image Pre-Training，OpenAI 2021）。通俗解释见 [【小白】一文读懂 CLIP 图文多模态模型](https://blog.csdn.net/weixin_47228643/article/details/136690837)：双塔结构，Image Encoder 和 Text Encoder 把图和文映射到同一向量空间；一批 N 对图文里，拉近真正配对的余弦相似度、推开其余配对。IP-Adapter 冻结 CLIP，用它从角色参考图抽出图像 embedding，再经小型投影网络对齐到文本特征维度，送进那路新增的图像 cross-attention。没有 CLIP，IP-Adapter 就没有可注入的“这张脸长什么样”的向量。
+
+零样本用法如下：把类别写成 `a photo of a {object}`，Text Encoder 得到 \(T_1 \ldots T_N\)；Image Encoder 把待分类图编成 \(I_1\)，再和每个 \(T_i\) 做点积，分数最高的那句就是预测。
+
+![CLIP 零样本分类](./images/clip-zero-shot.png)
+
+> 图：用标签文本构造分类器，再对未见过的图做零样本预测。来源：[一文读懂 CLIP 图文多模态模型](https://blog.csdn.net/weixin_47228643/article/details/136690837)（CSDN @weixin_47228643）。
+
+CLIP 的 Image Encoder 常用 **ViT（Vision Transformer）**：把图切成 patch，当成 token 序列，加上位置编码和一个可学习的 `[class]` embedding，送进多层 Transformer Encoder（Norm → Multi-Head Attention → 残差 → Norm → MLP → 残差）。分类时只取 `[class]` 经 MLP Head 的输出。IP-Adapter 冻结的就是这条视觉塔，所以角色参考图会先被切块、做自注意力，再变成可注入 U-Net 的图像特征。
+
+![ViT 把图片切成 token 序列](./images/clip-vit-architecture.png)
+
+> 图：ViT 结构。左：切块 → 线性投影 → patch + position embedding → Transformer Encoder → MLP Head；右：单层 Encoder 的注意力与 MLP。来源同上。
 
 三者在本项目里的分工：
 
