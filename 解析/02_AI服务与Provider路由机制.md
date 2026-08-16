@@ -204,11 +204,33 @@ flowchart LR
 
 不要和 IP-Adapter 混用：IP-Adapter 锁身份（这人长什么样），ControlNet 锁空间（人站在画面哪里、镜头怎么取）。`sketchApplyMode` 在 `lib/storyboard-sketch.ts`：ComfyUI 且启用 ControlNet 时为 `controlnet`，主流云端图片引擎为 `reference`，其余为 `none`。
 
+#### IP-Adapter 与 CLIP：角色身份怎么锁住
+
+IP-Adapter 的原理口径对齐 [IP-Adapter原理详解](https://zhuanlan.zhihu.com/p/3472288872)。该文指出：文生图很难用几句 Prompt 写清复杂轮廓、布局和色彩；ControlNet / T2I-Adapter 证明“加一个附加网络”能管结构，但若把参考图特征直接拼到文本特征上再送进原来的 cross-attention，图像约束往往偏弱——因为那套 Key / Value 投影是和文本对齐预训练出来的。IP-Adapter 因此提出**解耦交叉注意力**：U-Net 每个 cross-attention 层额外加一路图像注意力，Query 仍来自噪声潜空间，Key / Value 来自图像特征；训练只更新新增的 \(W'_k\)、\(W'_v\)，原 U-Net 冻结。推理时：
+
+\[
+Z_{new} = \mathrm{Attention}(Q,K,V) + \lambda \cdot \mathrm{Attention}(Q,K',V')
+\]
+
+λ 越大，角色参考图对成图的约束越强。这正好对应本项目“跨镜头同一张脸”的需求：角色设定图先生成一次，后续分镜把这张图当 image prompt，而不是每镜重新用文字描述外貌。
+
+图像特征从哪来？该文写明 Image Encoder 是冻结的 **CLIP**。CLIP 的通俗解释见 [【小白】一文读懂 CLIP 图文多模态模型](https://blog.csdn.net/weixin_47228643/article/details/136690837)：OpenAI 2021 的对比语言-图像预训练。双塔分别是 Image Encoder（ResNet 或 ViT）和 Text Encoder（Transformer）；在一批 N 对图文上，拉近真正配对的余弦相似度、推开其余 \(N^2-N\) 个错误配对。预测时比的是图向量和文向量是否靠近，因此能做零样本分类和检索。IP-Adapter 不重新训练 CLIP，只把它当作“把角色参考图变成一段能和文本特征对齐的向量”的编码器，再经小型 projection network（线性层 + LayerNorm）接到解耦注意力上。
+
+和 ControlNet 的工程差异也写在 `comfyui.service.ts` 的注释里：IP-Adapter 改的是 model（身份注入），ControlNet 改的是 conditioning（空间硬锁）。`HybridOrchestrator` 有草图且启用 ControlNet 时优先硬锁，失败回落 IP-Adapter。
+
 工作流在 `services/comfyui.service.ts` 的 `buildControlNetWorkflow`：Checkpoint → CLIP → 加载草图 → `CannyEdgePreprocessor` 取边缘 → `ControlNetLoader` + `ControlNetApplyAdvanced` 硬约束正/负条件 → KSampler 出图。`HybridOrchestrator` 在有 `sketchUrl` 且 `hasComfyUIControlNet()` 时优先 `generateWithControlNet`，失败回落 IP-Adapter，再回落云端引擎链。
 
 门控是 `COMFYUI_ENABLED=true` 且配置 `COMFYUI_CONTROLNET_MODEL`。这是预备态：需要自托管 ComfyUI、`comfyui_controlnet_aux` 和对应 canny 模型，仓库无法代替 live 验证。未配置时与升级前逐字节一致。
 
 没有开启或调用失败时，系统回落到 Midjourney、MiniMax、Gemini 等云端引擎。私有化环境若不允许出公网，应关闭外网 fallback。仓库只提供接入，不把 ComfyUI 本体和模型打进 Docker。
+
+原理参考（解释术语，不替代本仓库代码口径）：
+
+| 来源 | 补哪一块 |
+|---|---|
+| [深入浅出完整解析 ControlNet 核心基础知识](https://zhuanlan.zhihu.com/p/660924126) | ControlNet 辅助网络、预处理器、锁定/可训练副本、零卷积、Canny |
+| [IP-Adapter原理详解](https://zhuanlan.zhihu.com/p/3472288872) | 解耦交叉注意力、冻结 U-Net、λ 权重、与 ControlNet 的分工 |
+| [【小白】一文读懂 CLIP 图文多模态模型](https://blog.csdn.net/weixin_47228643/article/details/136690837) | CLIP 双塔、对比学习、图文余弦相似度；IP-Adapter 的 Image Encoder |
 
 ### 图片链路中的业务约束
 

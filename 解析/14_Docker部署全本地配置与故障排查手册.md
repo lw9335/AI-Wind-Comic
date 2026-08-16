@@ -184,7 +184,7 @@ XVERSE_FAST_MODEL=xverse/XVERSE-Ent-A4.2B
 
 ## 10. 本地 ComfyUI
 
-ComfyUI 是可选的本地图片工作流引擎，不是默认出图路径。Wind Comic 通过它做角色 IP-Adapter 一致性和可选的 ControlNet 草图硬锁。ControlNet 不是又一个云厂商：它是挂在扩散模型旁的辅助网络，用预处理器（本项目用 Canny）从分镜草图抽出边缘条件图，硬锁构图、机位和主体位置，比把草图当普通参考图更硬；未配置 `COMFYUI_CONTROLNET_MODEL` 时不会走这条路径。通俗原理见 [深入浅出完整解析 ControlNet 核心基础知识](https://zhuanlan.zhihu.com/p/660924126)；项目口径见 [00 总览 2.1](./00_WindComic项目解析总览.md) 和 [02 图片 Provider](./02_AI服务与Provider路由机制.md)。
+ComfyUI 是可选的本地图片工作流引擎，不是默认出图路径。Wind Comic 通过它做角色 IP-Adapter 一致性和可选的 ControlNet 草图硬锁。ControlNet 不是又一个云厂商：它是挂在扩散模型旁的辅助网络，用预处理器（本项目用 Canny）从分镜草图抽出边缘条件图，硬锁构图、机位和主体位置，比把草图当普通参考图更硬；未配置 `COMFYUI_CONTROLNET_MODEL` 时不会走这条路径。IP-Adapter 用冻结 CLIP 抽角色参考图特征，再经解耦交叉注意力锁身份。原理参考：[ControlNet](https://zhuanlan.zhihu.com/p/660924126)、[IP-Adapter](https://zhuanlan.zhihu.com/p/3472288872)、[CLIP](https://blog.csdn.net/weixin_47228643/article/details/136690837)；项目口径见 [00 总览 2.1](./00_WindComic项目解析总览.md) 和 [02 图片 Provider](./02_AI服务与Provider路由机制.md)。
 
 ```dotenv
 COMFYUI_ENABLED=true

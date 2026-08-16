@@ -333,9 +333,11 @@ LLM 可部署 XVERSE 为 OpenAI-compatible 服务，图片接 ComfyUI，视频�
 
 **参考回答：**
 
-ControlNet 是挂在扩散模型旁边的辅助网络：参考图经预处理器抽出空间条件（边缘、姿态、深度等），再注入生成过程，让出图按构图/姿态走，而不是只听 Prompt。Canny 属于边缘线条类，相当于描线填色——锁构图、机位、人物站位，不锁颜色和画风。短剧里分镜图常作为图生视频首帧，构图一漂后面整镜都会偏。原理通俗解释见 Rocky Ding：[深入浅出完整解析 ControlNet 核心基础知识](https://zhuanlan.zhihu.com/p/660924126)。
+ControlNet 是挂在扩散模型旁边的辅助网络：参考图经预处理器抽出空间条件（边缘、姿态、深度等），再注入生成过程，让出图按构图/姿态走，而不是只听 Prompt。Canny 属于边缘线条类，相当于描线填色——锁构图、机位、人物站位，不锁颜色和画风。短剧里分镜图常作为图生视频首帧，构图一漂后面整镜都会偏。原理见 Rocky Ding：[深入浅出完整解析 ControlNet 核心基础知识](https://zhuanlan.zhihu.com/p/660924126)。
 
-结构上是锁定副本（冻住底模型）+ 可训练副本（学空间条件）+ 零卷积（训练初期不打扰底模型）。它比把草图当参考图更硬：软参考是口头说“请跟构图”，模型可以不听；ControlNet 用边缘图改 conditioning，线条位置更难被改掉。也不要和 IP-Adapter 混：IP-Adapter 锁“这人长什么样”，ControlNet 锁“人站在画面哪里”；二者可叠加。
+结构上是锁定副本（冻住底模型）+ 可训练副本（学空间条件）+ 零卷积（训练初期不打扰底模型）。它比把草图当参考图更硬：软参考是口头说“请跟构图”，模型可以不听；ControlNet 用边缘图改 conditioning，线条位置更难被改掉。
+
+也不要和 IP-Adapter 混。IP-Adapter 锁“这人长什么样”，ControlNet 锁“人站在画面哪里”；二者可叠加。IP-Adapter 用解耦交叉注意力给 U-Net 加一路图像条件，底模型冻结，λ 调强度，见 [IP-Adapter原理详解](https://zhuanlan.zhihu.com/p/3472288872)。图像特征来自冻结的 CLIP：双塔把图和文映射到同一空间，用对比学习拉近配对、推开错配，见 [一文读懂 CLIP](https://blog.csdn.net/weixin_47228643/article/details/136690837)。本项目里 IP-Adapter 吃角色参考图，ControlNet 吃分镜草图。
 
 项目口径是**配置后可用 / 预备态**，不是默认路径。需要 `COMFYUI_ENABLED`、`COMFYUI_CONTROLNET_MODEL`、自托管 ComfyUI 和 `comfyui_controlnet_aux`。有草图时优先硬锁，失败回落 IP-Adapter 再回落云端；未配置时草图只当普通参考图，行为与升级前一致。代码在 `lib/storyboard-sketch.ts` 和 `services/comfyui.service.ts` 的 `buildControlNetWorkflow`。
 
