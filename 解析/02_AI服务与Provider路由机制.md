@@ -167,9 +167,33 @@ COMFYUI_URL=http://localhost:8188
 
 #### ControlNet（Canny）是什么
 
-ControlNet 给文生图加空间约束：出图时不只听文字 Prompt，还会被一张控制图卡住结构。Canny 是其中一种控制方式，先把分镜草图做成边缘线稿，再按这些线条锁构图。业务含义是：这一镜已经有手绘或 AI 线稿时，正式分镜图不要只“参考一下”，而要尽量按草图的机位、人物站位、景别来画。后面视频常拿分镜图当 image-to-video 首帧，构图一漂，角色位置和镜头语言就对不上。
+本节的原理口径对齐 Rocky Ding 的专栏：[深入浅出完整解析 ControlNet 核心基础知识](https://zhuanlan.zhihu.com/p/660924126)（对应论文 *Adding Conditional Control to Text-to-Image Diffusion Models*）。原文把 ControlNet 定义成挂在 Stable Diffusion / FLUX 旁边的**辅助网络**：给扩散模型加一条额外约束，引导它按期望的构图、姿态或结构出图，减少纯文生图的随机性。
+
+按该文的推理流程：
+
+```mermaid
+flowchart LR
+    REF["参考图 / 分镜草图"] --> PRE["预处理器 Preprocessor"]
+    PRE --> COND["条件图像 Conditioning Image"]
+    COND --> CN["ControlNet 可训练副本"]
+    TXT["文本 Prompt"] --> SD["锁定的 SD / FLUX 底模型"]
+    CN --> SD
+    SD --> OUT["受空间条件约束的成图"]
+```
+
+预处理器用传统视觉算法从参考图里抽出“纯粹的控制信息”。Canny、MLSD、Scribble、SoftEdge、Lineart 同属**边缘与线条类**；Depth / Normal 是几何类；OpenPose / Segmentation 是语义类。Wind Comic 当前接入的是 **Canny**：把分镜草图抽成边缘线稿，再按这些线条锁构图。业务含义是：这一镜已经有手绘或 AI 线稿时，正式分镜图不要只“参考一下”，而要尽量按草图的机位、人物站位、景别来画。后面视频常拿分镜图当 image-to-video 首帧，构图一漂，角色位置和镜头语言就对不上。
 
 可以把它想成“描线填色”：草图再糙，只要大轮廓对，正式图也可以画得很完整，但人还站在画面左边、镜头还是俯拍。颜色、细节、画风仍由 Prompt 决定。
+
+该文对最小单元的拆法，有助于理解“硬锁为什么不会把底模型画崩”：
+
+| 模块 | 作用 |
+|---|---|
+| 锁定副本 locked | 冻结底模型权重，保住从海量图学来的生成能力 |
+| 可训练副本 trainable copy | 专门学习空间条件（边缘、姿态、深度等） |
+| 零卷积 zero convolution | 1×1 卷积，权重和偏置从 0 起步；训练刚开始输出全 0，不把噪声灌进底模型 |
+
+这也解释了为什么用常规规模数据就能学会条件控制，而不必重训整个扩散模型。加载 ControlNet 时要同时加载底模型和 ControlNet 权重，显存会比只跑 SD / FLUX 更高（该文量级约多 0.7B 参数）。
 
 | | 软参考（默认、多数云端引擎） | ControlNet 硬锁（可选） |
 |---|---|---|

@@ -333,9 +333,9 @@ LLM 可部署 XVERSE 为 OpenAI-compatible 服务，图片接 ComfyUI，视频�
 
 **参考回答：**
 
-ControlNet 是给文生图加空间约束的技术：出图时不只听 Prompt，还会被一张控制图卡住结构。Canny 是把草图抽成边缘线稿的那种控制方式，相当于描线填色——锁构图、机位、人物站位，不锁颜色和画风。短剧里分镜图常作为图生视频首帧，构图一漂后面整镜都会偏。
+ControlNet 是挂在扩散模型旁边的辅助网络：参考图经预处理器抽出空间条件（边缘、姿态、深度等），再注入生成过程，让出图按构图/姿态走，而不是只听 Prompt。Canny 属于边缘线条类，相当于描线填色——锁构图、机位、人物站位，不锁颜色和画风。短剧里分镜图常作为图生视频首帧，构图一漂后面整镜都会偏。原理通俗解释见 Rocky Ding：[深入浅出完整解析 ControlNet 核心基础知识](https://zhuanlan.zhihu.com/p/660924126)。
 
-它比把草图当参考图更硬：软参考是口头说“请跟构图”，模型可以不听；ControlNet 用边缘图改 conditioning，线条位置更难被改掉。也不要和 IP-Adapter 混：IP-Adapter 锁“这人长什么样”，ControlNet 锁“人站在画面哪里”。
+结构上是锁定副本（冻住底模型）+ 可训练副本（学空间条件）+ 零卷积（训练初期不打扰底模型）。它比把草图当参考图更硬：软参考是口头说“请跟构图”，模型可以不听；ControlNet 用边缘图改 conditioning，线条位置更难被改掉。也不要和 IP-Adapter 混：IP-Adapter 锁“这人长什么样”，ControlNet 锁“人站在画面哪里”；二者可叠加。
 
 项目口径是**配置后可用 / 预备态**，不是默认路径。需要 `COMFYUI_ENABLED`、`COMFYUI_CONTROLNET_MODEL`、自托管 ComfyUI 和 `comfyui_controlnet_aux`。有草图时优先硬锁，失败回落 IP-Adapter 再回落云端；未配置时草图只当普通参考图，行为与升级前一致。代码在 `lib/storyboard-sketch.ts` 和 `services/comfyui.service.ts` 的 `buildControlNetWorkflow`。
 

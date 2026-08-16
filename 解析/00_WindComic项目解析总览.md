@@ -37,9 +37,13 @@ Wind Comic（界面品牌名“青枫漫剧”）是一个基于 Next.js 的 AI 
 
 **ComfyUI** 不是一个模型，而是可本地部署的开源图片工作流引擎（常见底座是 Stable Diffusion / FLUX）。本机加载模型后，通过 HTTP（默认 `8188`）按节点图出图。Wind Comic 把它当作图片层的可选本地出口：未开启时走 GPT Image、Gemini、Midjourney、MiniMax 等云端 Provider；开启后由 `services/comfyui.service.ts` 把角色图、场景图、分镜图请求转到本机。项目里主要用它做两件事：IP-Adapter 保持角色跨镜头一致；可选 ControlNet（Canny）按分镜草图硬锁构图。仓库只提供接入代码，不把 ComfyUI 和模型打进 Docker，需要 GPU 与自行部署。失败时默认可回落云端。
 
-**ControlNet** 是给文生图加空间约束的技术：出图时不只听文字 Prompt，还会被一张控制图卡住结构。括号里的 **Canny** 是其中一种控制方式——先把分镜草图抽成线稿边缘，再用这些线条锁构图、机位和主体位置，颜色、细节和画风仍由 Prompt 决定。可以把它想成“描线填色”：草图再糙，只要大轮廓对，正式图也可以画得很完整，但人还站在画面左边、镜头还是俯拍。短剧里这很关键，因为后面视频往往拿分镜图当首帧，构图一漂，角色位置和镜头语言就对不上。
+**ControlNet** 是挂在扩散模型（Stable Diffusion / FLUX 等）旁边的辅助网络：先给一张参考图，用预处理器抽出纯粹的空间条件（边缘、姿态、深度等），再把这张条件图注入生成过程，让出图按期望的构图、姿态或结构走，而不是只听文字 Prompt 的随机发挥。论文是 *Adding Conditional Control to Text-to-Image Diffusion Models*。本仓库的通俗解释采用 Rocky Ding 的专栏文章：[深入浅出完整解析 ControlNet 核心基础知识](https://zhuanlan.zhihu.com/p/660924126)。
 
-它和把草图当普通参考图不是一回事。多数云端引擎只能做**软参考**（把草图塞进参考图通道，口头说“请跟构图”，模型可以不听）；ControlNet 是**硬锁**（边缘位置更难被改掉）。它也和 **IP-Adapter** 不要混：IP-Adapter 锁的是“这人长什么样”（脸、服装、身份）；ControlNet 锁的是“人站在画面哪里、镜头怎么取”（空间布局）。
+按该文的用法：参考图 → 预处理器（Preprocessor）→ 条件图像（Conditioning Image）→ ControlNet 注入底模型，并与文本 Prompt（可选还有图生图）一起做扩散。括号里的 **Canny** 属于边缘/线条类条件——用 Canny 边缘检测把分镜草图抽成线稿，再用这些线条锁构图、机位和主体位置；颜色、细节和画风仍由 Prompt 决定。可以把它想成“描线填色”：草图再糙，只要大轮廓对，正式图也可以画得很完整，但人还站在画面左边、镜头还是俯拍。短剧里这很关键，因为后面视频往往拿分镜图当首帧，构图一漂，角色位置和镜头语言就对不上。
+
+结构上，该文把 ControlNet 拆成三块：**锁定副本**（冻结底模型权重，保住从海量图里学来的画图能力）、**可训练副本**（专门学空间条件）、**零卷积（zero convolution）**（1×1 卷积，权重偏置从 0 起步，训练初期不打扰底模型）。这解释了为什么可以在不大的数据集上学会“按线稿出图”，却不把原来的文生图能力毁掉。
+
+它和把草图当普通参考图不是一回事。多数云端引擎只能做**软参考**（把草图塞进参考图通道，口头说“请跟构图”，模型可以不听）；ControlNet 是**硬锁**（边缘位置更难被改掉）。它也和 **IP-Adapter** 不要混：IP-Adapter 锁的是“这人长什么样”（脸、服装、身份）；ControlNet 锁的是“人站在画面哪里、镜头怎么取”（空间布局）。同一篇文章把 IP-Adapter 列为另一路条件，可与 ControlNet 叠加，而不是互相替代。
 
 这是可选预备能力，不是默认路径：需要自托管 ComfyUI，并配置 `COMFYUI_ENABLED` 与 `COMFYUI_CONTROLNET_MODEL`。有草图时优先走 Canny ControlNet，失败再回落 IP-Adapter / 云端引擎；没配时行为与升级前一致，草图只当普通参考图。代码入口：`lib/storyboard-sketch.ts`、`services/comfyui.service.ts` 的 `buildControlNetWorkflow`。细节见 [02 图片 Provider](./02_AI服务与Provider路由机制.md)。
 
